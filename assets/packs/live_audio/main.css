@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Status indicator states */
+.status-indicator.status-ready {
+    @apply bg-green-600;
+}
+
+.status-indicator.status-recording {
+    @apply bg-red-600 animate-pulse;
+}
+
+.status-indicator.status-error {
+    @apply bg-yellow-400;
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+    .kino-live-audio-container {
+        @apply flex-col;
+    }
+
+    .kino-live-audio-controls button {
+        @apply min-w-0;
+    }
+}

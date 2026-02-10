@@ -4,20 +4,21 @@ defmodule KinoLiveAudio.MixProject do
   def project do
     [
       app: :kino_live_audio,
-      version: "0.1.1",
+      version: "0.2.0",
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
+      aliases: aliases(),
       deps: deps(),
       description:
         "A Kino designed to record a raw audio stream (no client-side encoding) and emit events.",
       source_url: "https://github.com/acalejos/kino_live_audio",
       package: package(),
-      preferred_cli_env: [
-        docs: :docs,
-        "hex.publish": :docs
-      ],
       docs: docs()
     ]
+  end
+
+  def cli do
+    [preferred_envs: [docs: :docs, "hex.publish": :docs]]
   end
 
   def application do
@@ -34,7 +35,7 @@ defmodule KinoLiveAudio.MixProject do
 
   defp deps do
     [
-      {:kino, "~> 0.12"},
+      {:kino, "~> 0.18"},
       {:ex_doc, ">= 0.0.0", only: :docs, runtime: false}
     ]
   end
@@ -48,6 +49,12 @@ defmodule KinoLiveAudio.MixProject do
       groups_for_extras: [
         Notebooks: Path.wildcard("notebooks/*.livemd")
       ]
+    ]
+  end
+
+  defp aliases do
+    [
+      build: ["cmd scripts/build.sh"]
     ]
   end
 end

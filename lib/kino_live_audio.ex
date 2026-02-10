@@ -9,13 +9,16 @@ defmodule KinoLiveAudio do
 
   Refer to the sample [Livebook](notebooks/vad.livemd) for usage.
   """
-  use Kino.JS, assets_path: "lib/assets/build"
+  use Kino.JS, assets_path: "lib/assets/live_audio/build"
   use Kino.JS.Live
 
-  @exps [s: 0, ms: -3, mu: -6]
+  @type t :: Kino.JS.Live.t()
 
   @doc """
   Creates a new `KinoLiveAudio`
+
+  The recorder captures raw PCM audio data (32-bit float samples) from the
+  browser's microphone using the Web Audio API.
 
   ## Options
 
@@ -28,45 +31,140 @@ defmodule KinoLiveAudio do
     * `:ms` - Miliseconds of audio before sending, according to the sample rate
     * `:mu` - Microseconds of audio before sending, according to the sample rate
   """
+  @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    opts = Keyword.validate!(opts, chunk_size: 16_000, sample_rate: 16_000, unit: :samples)
+    {chunk_size, sample_rate} = process_inputs!(opts)
 
-    if opts[:sample_rate] < 0 or not is_integer(opts[:sample_rate]),
-      do:
-        raise(
-          ArgumentError,
-          "Sample rate must be
-           a positive integer, got #{inspect(opts[:sample_rate])}"
-        )
+    Kino.JS.Live.new(__MODULE__, %{
+      sample_rate: sample_rate,
+      chunk_size: chunk_size
+    })
+  end
+
+  defp process_inputs!(opts) do
+    %{chunk_size: chunk_size, sample_rate: sample_rate, unit: unit} =
+      Keyword.validate!(opts, chunk_size: 16_000, sample_rate: 16_000, unit: :samples)
+      |> Map.new()
+
+    if not is_integer(sample_rate) or sample_rate <= 0 do
+      raise(ArgumentError, "Sample rate must be a positive integer, got #{inspect(sample_rate)}")
+    end
+
+    if not is_integer(chunk_size) or chunk_size <= 0 do
+      raise(ArgumentError, "Chunk size must be a positive integer, got #{inspect(chunk_size)}")
+    end
 
     chunk_size =
-      if opts[:unit] == :samples do
-        opts[:chunk_size]
-      else
-        exp =
-          @exps[opts[:unit]] ||
-            raise ArgumentError,
-                  ":unit opt must be in [:s, :ms, :ms, :samples], got #{inspect(opts[:unit])}"
+      case unit do
+        :samples ->
+          chunk_size
 
-        trunc(opts[:sample_rate] * (opts[:chunk_size] * 10 ** exp))
+        :s ->
+          trunc(sample_rate * chunk_size)
+
+        :ms ->
+          trunc(sample_rate * chunk_size / 1_000)
+
+        :mu ->
+          trunc(sample_rate * chunk_size / 1_000_000)
+
+        _ ->
+          raise ArgumentError,
+                ":unit opt must be in [:s, :ms, :ms or :samples, got: #{inspect(unit)}"
       end
 
-    Kino.JS.Live.new(__MODULE__, {chunk_size, opts[:sample_rate]})
+    {chunk_size, sample_rate}
+  end
+
+  @doc """
+  Reads the recorded audio data.
+
+  Returns the audio binary data or `nil` if no recording has been made.
+
+  ## Examples
+
+      recorder = KinoLiveAudio.new()
+      # ... user records audio ...
+      audio_data = KinoLiveAudio.read(recorder)
+
+  """
+  @spec read(t()) :: binary() | nil
+  def read(kino) do
+    Kino.JS.Live.call(kino, :read)
+  end
+
+  @doc """
+  This allows programmatic control of recording.
+
+  ## Examples
+
+      recorder = KinoLiveAudio.new()
+      KinoLiveAudio.start_recording(recorder)
+
+  """
+  @spec start_recording(t()) :: :ok
+  def start_recording(kino) do
+    Kino.JS.Live.cast(kino, :start_recording)
+  end
+
+  @doc """
+  This allows programmatic control of recording.
+
+  ## Examples
+
+      recorder = KinoLiveAudio.new()
+      KinoLiveAudio.stop_recording(recorder)
+
+  """
+  @spec stop_recording(t()) :: :ok
+  def stop_recording(kino) do
+    Kino.JS.Live.cast(kino, :stop_recording)
+  end
+
+  @doc """
+  Clears the recorded audio data.
+
+  ## Examples
+
+      recorder = KinoLiveAudio.new()
+      KinoLiveAudio.clear(recorder)
+
+  """
+  @spec clear(t()) :: :ok
+  def clear(kino) do
+    Kino.JS.Live.cast(kino, :clear)
   end
 
   @impl true
-  def init({chunk_size, sample_rate}, ctx) do
-    {:ok, assign(ctx, sample_rate: sample_rate, chunk_size: chunk_size)}
+  def init(config, ctx) do
+    {:ok, assign(ctx, config)}
   end
 
   @impl true
   def handle_connect(ctx) do
-    {:ok, %{sampleRate: ctx.assigns.sample_rate, chunkSize: ctx.assigns.chunk_size}, ctx}
+    payload = %{
+      sample_rate: ctx.assigns.sample_rate,
+      chunk_size: ctx.assigns.chunk_size
+    }
+
+    {:ok, payload, ctx}
   end
 
   @impl true
-  def handle_event("audio_chunk", chunk, ctx) do
-    emit_event(ctx, %{event: :audio_chunk, chunk: chunk})
+  def handle_event("audio_chunk", {:binary, _info, binary}, ctx) do
+    # Emit the audio chunk as an event for Kino.listen
+    emit_event(ctx, %{event: :audio_chunk, chunk: binary})
+    {:noreply, ctx}
+  end
+
+  @impl true
+  def handle_cast(:start_recording, ctx) do
+    broadcast_event(ctx, "start", %{})
+    {:noreply, ctx}
+  end
+
+  def handle_cast(:stop_recording, ctx) do
+    broadcast_event(ctx, "stop", %{})
     {:noreply, ctx}
   end
 end
