@@ -4,12 +4,12 @@ defmodule KinoLiveAudio do
 
   When you consume the events, you can directly convert the audio to an `Nx` tensor.
 
-  You may specify the sample rate of the audio and the frequency that events should be emmitted
+  You may specify the sample rate of the audio and the frequency that events should be emitted
   by specifying how many samples should accumulate before sending to the server.
 
   Refer to the sample [Livebook](notebooks/vad.livemd) for usage.
   """
-  use Kino.JS, assets_path: "lib/assets/build"
+  use Kino.JS, assets_path: "lib/assets/live_audio/build"
   use Kino.JS.Live
 
   @exps [s: 0, ms: -3, mu: -6]
@@ -20,12 +20,12 @@ defmodule KinoLiveAudio do
   ## Options
 
   * `:chunk_size` - Wait for this many samples before sending. Will send exactly this amount to the
-      emmited event. Must be a positive integer. Defaults to 16_000.
+      emitted event. Must be a positive integer. Defaults to 16_000.
   * `:sample_rate` - The sample rate of the audio stream. Defaults to 16_000.
   * `:unit` - The unit for the `:chunk_size` option. Can be any of the following:
     * `:samples` - Directly passes the `:chunk_size` parameter
     * `:s` - Seconds of audio before sending, according to the sample rate
-    * `:ms` - Miliseconds of audio before sending, according to the sample rate
+    * `:ms` - Milliseconds of audio before sending, according to the sample rate
     * `:mu` - Microseconds of audio before sending, according to the sample rate
   """
   def new(opts \\ []) do
@@ -35,8 +35,7 @@ defmodule KinoLiveAudio do
       do:
         raise(
           ArgumentError,
-          "Sample rate must be
-           a positive integer, got #{inspect(opts[:sample_rate])}"
+          "Sample rate must be a positive integer, got #{inspect(opts[:sample_rate])}"
         )
 
     chunk_size =
@@ -46,10 +45,17 @@ defmodule KinoLiveAudio do
         exp =
           @exps[opts[:unit]] ||
             raise ArgumentError,
-                  ":unit opt must be in [:s, :ms, :ms, :samples], got #{inspect(opts[:unit])}"
+                  ":unit opt must be in [:s, :ms, :mu, :samples], got #{inspect(opts[:unit])}"
 
         trunc(opts[:sample_rate] * (opts[:chunk_size] * 10 ** exp))
       end
+
+    if chunk_size <= 0,
+      do:
+        raise(
+          ArgumentError,
+          "Chunk size must be positive, got #{chunk_size}"
+        )
 
     Kino.JS.Live.new(__MODULE__, {chunk_size, opts[:sample_rate]})
   end
@@ -66,7 +72,7 @@ defmodule KinoLiveAudio do
 
   @impl true
   def handle_event("audio_chunk", chunk, ctx) do
-    emit_event(ctx, %{event: :audio_chunk, chunk: chunk})
+    broadcast_event(ctx, "audio_chunk", %{chunk: chunk})
     {:noreply, ctx}
   end
 end
