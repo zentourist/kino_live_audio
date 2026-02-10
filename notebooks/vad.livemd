@@ -14,12 +14,22 @@ Mix.install([
 ## Setup Model & Plot
 
 ```elixir
-# This is for v5 which uses a new architecture
-# url =
-#   "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+# Choose which version to use
+model_version = Kino.Input.select("Model Version", v4: "v4 (stable)", v5: "v5 (latest)")
+```
 
-# This is for v4
-url = "https://raw.githubusercontent.com/snakers4/silero-vad/v4.0stable/files/silero_vad.onnx"
+```elixir
+# Download and load the model
+model_version_key = Kino.Input.read(model_version)
+
+url =
+  case model_version_key do
+    :v5 ->
+      "https://raw.githubusercontent.com/snakers4/silero-vad/master/src/silero_vad/data/silero_vad.onnx"
+
+    :v4 ->
+      "https://raw.githubusercontent.com/snakers4/silero-vad/v4.0stable/files/silero_vad.onnx"
+  end
 
 filename = url |> String.split("/") |> Enum.reverse() |> hd
 
@@ -33,36 +43,57 @@ resp =
 model = Ortex.load(filename)
 
 chart =
-  VegaLite.new(title: "Voice-Activated Detection", width: 800, height: 400)
-  |> VegaLite.mark(:line)
-  |> VegaLite.encode_field(:x, "x",
-    type: :quantitative,
-    title: "Time",
-    axis: [ticks: false, domain: false, grid: false, labels: false]
-  )
-  |> VegaLite.encode_field(:y, "y",
-    type: :quantitative,
-    title: "Voice",
-    scale: [domain_max: 1, domain_min: 0]
-  )
+  VegaLite.new(title: "Voice Activity Detection", width: 800, height: 400)
+  |> VegaLite.layers([
+    # VAD probability line
+    VegaLite.new()
+    |> VegaLite.mark(:line, color: "#3b82f6", size: 2)
+    |> VegaLite.encode_field(:x, "x",
+      type: :quantitative,
+      title: "Time (samples)",
+      axis: [grid: false]
+    )
+    |> VegaLite.encode_field(:y, "y",
+      type: :quantitative,
+      title: "Voice Probability",
+      scale: [domain: [0, 1]]
+    ),
+    # Threshold reference line at 0.5
+    VegaLite.new()
+    |> VegaLite.data(values: [%{y: 0.5}])
+    |> VegaLite.mark(:rule, color: "#ef4444", stroke_dash: [5, 5])
+    |> VegaLite.encode_field(:y, "y", type: :quantitative)
+  ])
   |> Kino.VegaLite.new()
 ```
 
+## Audio Configuration
+
+> **Important**: Silero VAD works best with specific chunk sizes:
+> - **16 kHz**: Use 512 samples (32ms) or 256 samples (16ms)
+> - **8 kHz**: Use 256 samples (32ms) or 128 samples (16ms)
+>
+> Using chunks that are too large (like 1 second = 16000 samples) will cause errors!
+
 ```elixir
-chunk_size = Kino.Input.text("Chunk Size", default: "1")
+# Silero VAD works best with 512 samples at 16kHz (32ms chunks)
+# or 256 samples at 16kHz (16ms chunks)
+chunk_size = Kino.Input.text("Chunk Size", default: "512")
 sample_rate = Kino.Input.text("Sample Rate", default: "16000")
 
 unit =
   Kino.Input.select(
     "Unit",
-    [samples: "Samples", s: "Seconds", ms: "Miliseconds", mu: "Microseconds"],
-    default: :s
+    [samples: "Samples", ms: "Milliseconds", s: "Seconds"],
+    default: :samples
   )
+
+debug_mode = Kino.Input.checkbox("Debug Mode (show probabilities)", default: false)
 
 clear = Kino.Control.button("Clear Plot")
 clear |> Kino.listen(fn _ -> Kino.VegaLite.clear(chart) end)
 top_row = Kino.Layout.grid([sample_rate, chunk_size, unit], columns: 3)
-Kino.Layout.grid([top_row, clear])
+Kino.Layout.grid([top_row, debug_mode, clear])
 ```
 
 ```elixir
@@ -75,17 +106,98 @@ liveAudio =
 ```
 
 ```elixir
-sr = Kino.Input.read(sample_rate)
-liveAudio
-|> Kino.Control.stream()
-|> Kino.listen({Nx.broadcast(0.0, {2, 1, 64}), Nx.broadcast(0.0, {2, 1, 64})}, fn
-  %{event: :audio_chunk, chunk: data}, {hn, cn} ->
-    input = Nx.tensor([data])
-    sr = Nx.tensor(sr |> Integer.parse() |> elem(0), type: :s64)
-    {output, hn, cn} = Ortex.run(model, {input, sr, hn, cn})
-    [output] = Nx.to_list(output |> Nx.flatten())
-    row = %{x: :os.system_time(), y: output}
-    Kino.VegaLite.push(chart, row, window: 1000)
-    {:cont, {hn, cn}}
-end)
+sample_rate_value = Kino.Input.read(sample_rate) |> Integer.parse() |> elem(0)
+model_version_key = Kino.Input.read(model_version)
+debug = Kino.Input.read(debug_mode)
+
+case model_version_key do
+  :v5 ->
+    # v5 model: uses single state tensor
+    init_state = %{state: Nx.broadcast(0.0, {2, 1, 128}), counter: 0}
+
+    liveAudio
+    |> Kino.Control.stream()
+    |> Kino.listen(init_state, fn
+      %{event: :audio_chunk, chunk: data}, %{state: state, counter: counter} ->
+        # Convert binary to Nx tensor
+        samples = Nx.from_binary(data, :f32)
+
+        # Debug: Check audio statistics
+        if debug and rem(counter, 30) == 0 do
+          audio_mean = Nx.mean(samples) |> Nx.to_number()
+          audio_max = Nx.reduce_max(samples) |> Nx.to_number()
+          audio_min = Nx.reduce_min(samples) |> Nx.to_number()
+          IO.puts("Audio stats: mean=#{Float.round(audio_mean, 4)}, min=#{Float.round(audio_min, 4)}, max=#{Float.round(audio_max, 4)}")
+        end
+
+        # Reshape to 2D: [batch=1, samples]
+        input = Nx.reshape(samples, {1, :auto})
+
+        # Sample rate as scalar
+        sr = Nx.tensor(sample_rate_value, type: :s64)
+
+        # Run model
+        {output, state_n} = Ortex.run(model, {input, state, sr})
+
+        # Extract probability
+        prob = output |> Nx.squeeze() |> Nx.to_number()
+
+        # Debug: Show probability every 30 chunks (~1 second)
+        if debug and rem(counter, 30) == 0 do
+          IO.puts("VAD probability: #{Float.round(prob, 4)}")
+        end
+
+        # Push to chart with counter for x-axis
+        row = %{x: counter, y: prob}
+        Kino.VegaLite.push(chart, row, window: 1000)
+
+        {:cont, %{state: state_n, counter: counter + 1}}
+    end)
+
+  :v4 ->
+    # v4 model: uses separate hn and cn states
+    init_state = %{
+      hn: Nx.broadcast(0.0, {2, 1, 64}),
+      cn: Nx.broadcast(0.0, {2, 1, 64}),
+      counter: 0
+    }
+
+    liveAudio
+    |> Kino.Control.stream()
+    |> Kino.listen(init_state, fn
+      %{event: :audio_chunk, chunk: data}, %{hn: hn, cn: cn, counter: counter} ->
+        # Convert binary to Nx tensor and add batch dimension
+        samples = Nx.from_binary(data, :f32)
+
+        # Debug: Check audio statistics
+        if debug and rem(counter, 30) == 0 do
+          audio_mean = Nx.mean(samples) |> Nx.to_number()
+          audio_max = Nx.reduce_max(samples) |> Nx.to_number()
+          audio_min = Nx.reduce_min(samples) |> Nx.to_number()
+          IO.puts("Audio stats: mean=#{Float.round(audio_mean, 4)}, min=#{Float.round(audio_min, 4)}, max=#{Float.round(audio_max, 4)}")
+        end
+
+        input = Nx.reshape(samples, {1, :auto})
+
+        # Sample rate as scalar
+        sr = Nx.tensor(sample_rate_value, type: :s64)
+
+        # Run model
+        {output, hn, cn} = Ortex.run(model, {input, sr, hn, cn})
+
+        # Extract probability
+        prob = output |> Nx.squeeze() |> Nx.to_number()
+
+        # Debug: Show probability every 30 chunks (~1 second)
+        if debug and rem(counter, 30) == 0 do
+          IO.puts("VAD probability: #{Float.round(prob, 4)}")
+        end
+
+        # Push to chart with counter for x-axis
+        row = %{x: counter, y: prob}
+        Kino.VegaLite.push(chart, row, window: 1000)
+
+        {:cont, %{hn: hn, cn: cn, counter: counter + 1}}
+    end)
+end
 ```
