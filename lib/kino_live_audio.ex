@@ -1,87 +1,21 @@
 defmodule KinoLiveAudio do
   @moduledoc """
-  A Kino component for recording live audio from the browser in Livebook.
+  A Kino designed to record a raw audio stream (no client-side encoding) and emit events.
 
-  This component allows you to capture raw PCM audio from the user's microphone
-  and stream it as binary data for real-time processing. The audio is captured
-  using the Web Audio API with AudioWorklet for low-latency access to raw samples.
+  When you consume the events, you can directly convert the audio to an `Nx` tensor.
 
-  ## Examples
+  You may specify the sample rate of the audio and the frequency that events should be emmitted
+  by specifying how many samples should accumulate before sending to the server.
 
-      # Create a simple audio recorder
-      recorder = KinoLiveAudio.new()
-
-      # Read the recorded audio data (raw PCM)
-      audio_data = KinoLiveAudio.read(recorder)
-
-      # Stream audio chunks as they're recorded
-      recorder = KinoLiveAudio.new(chunk_size: 30, unit: :ms)
-
-      Kino.listen(recorder, fn chunk ->
-        # Process raw PCM audio chunk in real-time
-        # Perfect for VAD, speech recognition, etc.
-        IO.inspect(byte_size(chunk))
-      end)
-
-      # Start recording programmatically
-      KinoLiveAudio.start_recording(recorder)
-
-      # Stop recording programmatically
-      KinoLiveAudio.stop_recording(recorder)
-
-      # Clear the recorded audio
-      KinoLiveAudio.clear(recorder)
-
-  ## Options
-
-  When creating a new recorder with `new/1`, you can pass the following options:
-
-    * `:sample_rate` - the sample rate for recording. Common values are
-      `8000`, `16000`, `44100`, `48000`. Defaults to `48000`.
-
-    * `:chunk_size` - the size of audio chunks to stream. When set, audio
-      chunks will be emitted as events that can be consumed with `Kino.listen/2`.
-      Defaults to `nil` (no streaming).
-
-    * `:unit` - the unit for `:chunk_size`. Either `:ms` (milliseconds) or
-      `:samples`. Defaults to `:ms`.
-
-  ## Audio Format
-
-  The recorded audio is raw PCM (Pulse Code Modulation) data in 32-bit
-  float little-endian format (`pcm_f32le`). Each sample is a Float32 value
-  between -1.0 and 1.0, representing the audio waveform amplitude.
-
-  This format is ideal for:
-  - Voice Activity Detection (VAD)
-  - Real-time speech recognition
-  - Audio analysis and DSP
-  - Custom audio processing pipelines
-
-  To convert PCM to other formats, you can use FFmpeg or other audio tools.
-
-  ## Streaming Audio
-
-  When `:chunk_size` is specified, raw PCM chunks will be emitted as events
-  during recording. This is perfect for real-time audio processing:
-
-      recorder = KinoLiveAudio.new(chunk_size: 100, unit: :ms, sample_rate: 16000)
-
-      Kino.listen(recorder, fn chunk ->
-        # chunk is raw PCM data (Float32 samples)
-        # Process chunk for VAD, transcription, etc.
-        process_audio_chunk(chunk)
-      end)
-
+  Refer to the sample [Livebook](notebooks/vad.livemd) for usage.
   """
-
   use Kino.JS, assets_path: "lib/assets/live_audio/build"
   use Kino.JS.Live
 
   @type t :: Kino.JS.Live.t()
 
   @doc """
-  Creates a new live audio recorder.
+  Creates a new `KinoLiveAudio`
 
   The recorder captures raw PCM audio data (32-bit float samples) from the
   browser's microphone using the Web Audio API.
@@ -155,8 +89,6 @@ defmodule KinoLiveAudio do
   end
 
   @doc """
-  Starts recording audio.
-
   This allows programmatic control of recording.
 
   ## Examples
@@ -171,8 +103,6 @@ defmodule KinoLiveAudio do
   end
 
   @doc """
-  Stops recording audio.
-
   This allows programmatic control of recording.
 
   ## Examples
@@ -209,8 +139,7 @@ defmodule KinoLiveAudio do
   def handle_connect(ctx) do
     payload = %{
       sample_rate: ctx.assigns.sample_rate,
-      chunk_size: ctx.assigns.chunk_size,
-      unit: ctx.assigns.unit
+      chunk_size: ctx.assigns.chunk_size
     }
 
     {:ok, payload, ctx}
@@ -223,11 +152,11 @@ defmodule KinoLiveAudio do
     {:noreply, ctx}
   end
 
-  def handle_event("audio_data", {:binary, info, binary}, ctx) do
-    ctx = assign(ctx, audio_data: binary)
-    broadcast_event(ctx, "audio_saved", info)
-    {:noreply, ctx}
-  end
+  # def handle_event("audio_data", {:binary, info, binary}, ctx) do
+  #  ctx = assign(ctx, audio_data: binary)
+  #  broadcast_event(ctx, "audio_saved", info)
+  #  {:noreply, ctx}
+  # end
 
   @impl true
   def handle_call(:read, _from, ctx) do
