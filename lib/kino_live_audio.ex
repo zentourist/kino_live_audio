@@ -139,7 +139,8 @@ defmodule KinoLiveAudio do
   def handle_connect(ctx) do
     payload = %{
       sample_rate: ctx.assigns.sample_rate,
-      chunk_size: ctx.assigns.chunk_size
+      chunk_size: ctx.assigns.chunk_size,
+      unit: ctx.assigns.unit
     }
 
     {:ok, payload, ctx}
