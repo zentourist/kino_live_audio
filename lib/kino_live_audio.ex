@@ -77,23 +77,6 @@ defmodule KinoLiveAudio do
   end
 
   @doc """
-  Reads the recorded audio data.
-
-  Returns the audio binary data or `nil` if no recording has been made.
-
-  ## Examples
-
-      recorder = KinoLiveAudio.new()
-      # ... user records audio ...
-      audio_data = KinoLiveAudio.read(recorder)
-
-  """
-  @spec read(t()) :: binary() | nil
-  def read(kino) do
-    Kino.JS.Live.call(kino, :read)
-  end
-
-  @doc """
   This allows programmatic control of recording.
 
   ## Examples
@@ -121,20 +104,6 @@ defmodule KinoLiveAudio do
     Kino.JS.Live.cast(kino, :stop_recording)
   end
 
-  @doc """
-  Clears the recorded audio data.
-
-  ## Examples
-
-      recorder = KinoLiveAudio.new()
-      KinoLiveAudio.clear(recorder)
-
-  """
-  @spec clear(t()) :: :ok
-  def clear(kino) do
-    Kino.JS.Live.cast(kino, :clear)
-  end
-
   @impl true
   def init(config, ctx) do
     {:ok, assign(ctx, config)}
@@ -154,6 +123,18 @@ defmodule KinoLiveAudio do
   def handle_event("audio_chunk", {:binary, _info, binary}, ctx) do
     # Emit the audio chunk as an event for Kino.listen
     emit_event(ctx, %{event: :audio_chunk, chunk: binary})
+    {:noreply, ctx}
+  end
+
+  @impl true
+  def handle_event("start_recording", _payload, ctx) do
+    emit_event(ctx, %{event: :start_recording})
+    {:noreply, ctx}
+  end
+
+  @impl true
+  def handle_event("stop_recording", _payload, ctx) do
+    emit_event(ctx, %{event: :stop_recording})
     {:noreply, ctx}
   end
 
