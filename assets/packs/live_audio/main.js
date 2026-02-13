@@ -208,6 +208,8 @@ export function init(ctx, config) {
       workletNode.connect(audioContext.destination);
       console.log(`[KinoLiveAudio] Worklet connected to destination`);
 
+      ctx.pushEvent("start_recording", null);
+
       startTimer();
       updateButtonState(true);
     } catch (error) {
@@ -237,6 +239,8 @@ export function init(ctx, config) {
         stream.getTracks().forEach((track) => track.stop());
         stream = null;
       }
+
+      ctx.pushEvent("stop_recording", null);
 
       updateButtonState(false);
     }

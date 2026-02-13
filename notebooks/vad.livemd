@@ -169,6 +169,9 @@ case model_version_key do
         context_n = input_with_context[[.., -64..-1]]
 
         {:cont, %{state: state_n, context: context_n, counter: counter + 1}}
+
+      event, state ->
+        {:cont, state}
     end)
 
   :v4 ->
@@ -218,6 +221,9 @@ case model_version_key do
         Kino.VegaLite.push(chart, row, window: 1000)
 
         {:cont, %{hn: hn, cn: cn, counter: counter + 1}}
+
+      event, state ->
+        {:cont, state}
     end)
 end
 ```
